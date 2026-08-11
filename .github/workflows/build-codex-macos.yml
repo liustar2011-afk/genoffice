@@ -42,7 +42,6 @@ jobs:
         shell: bash
         run: |
           echo "uname -m: $(uname -m)"
-          echo "node arch after setup will be checked below"
           test "$(uname -m)" = "arm64"
 
       - name: Setup Node 22
@@ -99,7 +98,6 @@ jobs:
         run: |
           shopt -s nullglob
           dmgs=(apps/shell/release/*.dmg)
-          zips=(apps/shell/release/*mac*.zip apps/shell/release/*.zip)
           if (( ${#dmgs[@]} == 0 )); then
             echo 'No macOS .dmg was produced.' >&2
             exit 1
@@ -112,21 +110,12 @@ jobs:
             echo "- DMG: \`$(basename "$file")\`" >> "$GITHUB_STEP_SUMMARY"
             echo "- SHA256: \`$hash\`" >> "$GITHUB_STEP_SUMMARY"
           done
-          for file in "${zips[@]}"; do
-            [[ -f "$file" ]] || continue
-            hash=$(shasum -a 256 "$file" | awk '{print $1}')
-            echo "- ZIP: \`$(basename "$file")\` — SHA256 \`$hash\`" >> "$GITHUB_STEP_SUMMARY"
-          done
 
-      - name: Upload macOS installer
+      - name: Upload macOS DMG installer
         uses: actions/upload-artifact@v4
         with:
-          name: GenOffice-Codex-macOS-Apple-Silicon
-          path: |
-            apps/shell/release/*.dmg
-            apps/shell/release/*.zip
-            apps/shell/release/*.yml
-            apps/shell/release/*.blockmap
+          name: GenOffice-Codex-macOS-Apple-Silicon-DMG
+          path: apps/shell/release/*.dmg
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
