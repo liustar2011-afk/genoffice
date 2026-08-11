@@ -21,15 +21,47 @@ Write-Host "Node: $(node --version)"
 Assert-NativeSuccess 'node --version'
 Write-Host "npm:  $(npm --version)"
 Assert-NativeSuccess 'npm --version'
+$nodeMajor = [int]((node --version).TrimStart('v').Split('.')[0])
+if ($nodeMajor -ne 22) {
+  Write-Warning "This repository pins Node 22 in .nvmrc; current Node is $(node --version). Continue for now, but switch to Node 22 if install/build shows compatibility errors."
+}
+
+Write-Host "npm registry: $(npm config get registry)"
+Assert-NativeSuccess 'npm config get registry'
+Write-Host '[0/4] Checking npm registry connectivity...'
+npm ping --registry=https://registry.npmjs.org/ --loglevel=notice
+Assert-NativeSuccess 'npm ping'
 
 Write-Host '[1/4] Installing dependencies and applying Codex integration...'
-# npm supports fetch retry controls. Use generous retry windows for unstable links/VPNs.
-npm install --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=120000
+Write-Host 'Verbose/timing output is enabled so download and lifecycle-script progress is visible.'
+$installArgs = @(
+  'install',
+  '--foreground-scripts',
+  '--loglevel=verbose',
+  '--timing',
+  '--progress=true',
+  '--fetch-retries=5',
+  '--fetch-timeout=60000',
+  '--fetch-retry-mintimeout=2000',
+  '--fetch-retry-maxtimeout=120000'
+)
+& npm @installArgs
 if ($LASTEXITCODE -ne 0) {
-  Write-Warning 'npm install failed. Verifying the npm cache, then retrying once...'
+  Write-Warning 'npm install failed. Verifying the npm cache, then retrying once with longer network timeouts...'
   npm cache verify
   Assert-NativeSuccess 'npm cache verify'
-  npm install --fetch-retries=5 --fetch-retry-mintimeout=5000 --fetch-retry-maxtimeout=180000
+  $retryArgs = @(
+    'install',
+    '--foreground-scripts',
+    '--loglevel=verbose',
+    '--timing',
+    '--progress=true',
+    '--fetch-retries=5',
+    '--fetch-timeout=120000',
+    '--fetch-retry-mintimeout=5000',
+    '--fetch-retry-maxtimeout=180000'
+  )
+  & npm @retryArgs
   Assert-NativeSuccess 'npm install (retry)'
 }
 
