@@ -72,6 +72,30 @@ const run = spawnSync(process.execPath, [scriptPath, repo], {
   stdio: 'inherit',
   env: process.env,
 })
+if (run.error) {
+  rmSync(runtimeDir, { recursive: true, force: true })
+  throw run.error
+}
+if (run.status !== 0) {
+  rmSync(runtimeDir, { recursive: true, force: true })
+  process.exit(run.status ?? 1)
+}
+
+// The Codex account-status handler returns before the retained legacy Genspark
+// fallback. TypeScript therefore treats that compatibility block as unreachable
+// and no longer narrows `info` through the existing ternary guard. Keep the
+// legacy source for easier upstream rebases, but make its already-guarded access
+// explicit to the type checker. This does not alter runtime behavior.
+const shellMainPath = join(repo, 'apps', 'shell', 'src', 'main', 'index.ts')
+let shellMain = readFileSync(shellMainPath, 'utf8')
+const legacyInfoAccess = '? { loggedIn: true, email: info.email, creditBalance: info.creditBalance }'
+const narrowedLegacyInfoAccess = '? { loggedIn: true, email: info!.email, creditBalance: info!.creditBalance }'
+if (shellMain.includes(legacyInfoAccess)) {
+  shellMain = shellMain.replaceAll(legacyInfoAccess, narrowedLegacyInfoAccess)
+  writeFileSync(shellMainPath, shellMain)
+} else if (!shellMain.includes(narrowedLegacyInfoAccess)) {
+  rmSync(runtimeDir, { recursive: true, force: true })
+  throw new Error('Shell legacy account compatibility marker not found after Codex migration')
+}
+
 rmSync(runtimeDir, { recursive: true, force: true })
-if (run.error) throw run.error
-if (run.status !== 0) process.exit(run.status ?? 1)
