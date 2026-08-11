@@ -28,15 +28,17 @@ if ($nodeMajor -ne 22) {
 
 Write-Host "npm registry: $(npm config get registry)"
 Assert-NativeSuccess 'npm config get registry'
-Write-Host '[0/5] Checking npm registry connectivity...'
+Write-Host '[0/6] Checking npm registry connectivity...'
 npm ping --registry=https://registry.npmjs.org/ --loglevel=notice
 Assert-NativeSuccess 'npm ping'
 
-Write-Host '[1/5] Installing/updating npm packages WITHOUT lifecycle scripts...'
+Write-Host '[1/6] Installing/updating npm packages WITHOUT lifecycle scripts...'
 Write-Host 'Electron binary download is intentionally skipped here so GitHub Releases cannot block Codex finalization.'
 $installArgs = @(
   'install',
   '--ignore-scripts',
+  '--no-audit',
+  '--no-fund',
   '--loglevel=notice',
   '--progress=true',
   '--fetch-retries=5',
@@ -49,15 +51,19 @@ if ($LASTEXITCODE -ne 0) {
   Write-Warning 'npm install --ignore-scripts failed. Verifying cache, then retrying once...'
   npm cache verify
   Assert-NativeSuccess 'npm cache verify'
-  & npm install --ignore-scripts --loglevel=notice --progress=true --fetch-retries=5 --fetch-timeout=120000 --fetch-retry-mintimeout=5000 --fetch-retry-maxtimeout=180000
+  & npm install --ignore-scripts --no-audit --no-fund --loglevel=notice --progress=true --fetch-retries=5 --fetch-timeout=120000 --fetch-retry-mintimeout=5000 --fetch-retry-maxtimeout=180000
   Assert-NativeSuccess 'npm install --ignore-scripts (retry)'
 }
 
-Write-Host '[2/5] Applying Codex source migration...'
+Write-Host '[2/6] Applying readable Codex source migration...'
 node tools/codex-v1/bootstrap.mjs .
 Assert-NativeSuccess 'Codex migration bootstrap'
 
-Write-Host '[3/5] Checking project-local Codex runtime...'
+Write-Host '[3/6] Syntax-checking release packaging configuration...'
+node --check apps/shell/electron-builder.cjs
+Assert-NativeSuccess 'electron-builder.cjs syntax check'
+
+Write-Host '[4/6] Checking project-local Codex runtime...'
 $codex = Join-Path $repo 'node_modules\.bin\codex.cmd'
 if (-not (Test-Path $codex)) {
   throw "Project-local Codex runtime was not installed: $codex"
@@ -65,11 +71,11 @@ if (-not (Test-Path $codex)) {
 & $codex --version
 Assert-NativeSuccess 'codex --version'
 
-Write-Host '[4/5] Type checking GenOffice...'
+Write-Host '[5/6] Type checking GenOffice...'
 npm run typecheck
 Assert-NativeSuccess 'npm run typecheck'
 
-Write-Host '[5/5] Testing Codex bridge...'
+Write-Host '[6/6] Testing Codex bridge...'
 npm run test -w @genoffice/codex-bridge
 Assert-NativeSuccess 'Codex bridge tests'
 
