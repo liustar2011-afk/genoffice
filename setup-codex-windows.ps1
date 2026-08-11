@@ -28,11 +28,11 @@ if ($nodeMajor -ne 22) {
 
 Write-Host "npm registry: $(npm config get registry)"
 Assert-NativeSuccess 'npm config get registry'
-Write-Host '[0/4] Checking npm registry connectivity...'
+Write-Host '[0/5] Checking npm registry connectivity...'
 npm ping --registry=https://registry.npmjs.org/ --loglevel=notice
 Assert-NativeSuccess 'npm ping'
 
-Write-Host '[1/4] Installing dependencies and applying Codex integration...'
+Write-Host '[1/5] Installing dependencies (Codex migration is intentionally NOT run inside npm postinstall)...'
 Write-Host 'Verbose/timing output is enabled so download and lifecycle-script progress is visible.'
 $installArgs = @(
   'install',
@@ -65,7 +65,11 @@ if ($LASTEXITCODE -ne 0) {
   Assert-NativeSuccess 'npm install (retry)'
 }
 
-Write-Host '[2/4] Checking project-local Codex runtime...'
+Write-Host '[2/5] Applying Codex source migration...'
+node tools/codex-v1/bootstrap.mjs .
+Assert-NativeSuccess 'Codex migration bootstrap'
+
+Write-Host '[3/5] Checking project-local Codex runtime...'
 $codex = Join-Path $repo 'node_modules\.bin\codex.cmd'
 if (-not (Test-Path $codex)) {
   throw "Project-local Codex runtime was not installed: $codex"
@@ -73,11 +77,11 @@ if (-not (Test-Path $codex)) {
 & $codex --version
 Assert-NativeSuccess 'codex --version'
 
-Write-Host '[3/4] Type checking GenOffice...'
+Write-Host '[4/5] Type checking GenOffice...'
 npm run typecheck
 Assert-NativeSuccess 'npm run typecheck'
 
-Write-Host '[4/4] Testing Codex bridge...'
+Write-Host '[5/5] Testing Codex bridge...'
 npm run test -w @genoffice/codex-bridge
 Assert-NativeSuccess 'Codex bridge tests'
 
