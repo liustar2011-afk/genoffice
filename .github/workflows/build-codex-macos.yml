@@ -1,0 +1,132 @@
+name: Build Codex macOS Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex-v1
+    paths:
+      - '.github/workflows/build-codex-macos.yml'
+      - 'apps/**'
+      - 'packages/**'
+      - 'tools/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.nvmrc'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-codex-macos.yml'
+      - 'apps/**'
+      - 'packages/**'
+      - 'tools/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.nvmrc'
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos-installer:
+    name: macOS Apple Silicon installer
+    runs-on: macos-15
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout codex-v1
+        uses: actions/checkout@v4
+
+      - name: Verify Apple Silicon runner
+        shell: bash
+        run: |
+          echo "uname -m: $(uname -m)"
+          echo "node arch after setup will be checked below"
+          test "$(uname -m)" = "arm64"
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Verify Node architecture
+        shell: bash
+        run: |
+          node --version
+          node -p "process.arch"
+          test "$(node -p 'process.arch')" = "arm64"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies and Electron
+        shell: bash
+        run: npm ci
+
+      - name: Verify bundled Codex CLI
+        shell: bash
+        run: ./node_modules/.bin/codex --version
+
+      - name: Typecheck GenOffice
+        shell: bash
+        run: npm run typecheck
+
+      - name: Test Codex bridge
+        shell: bash
+        run: npm run test -w @genoffice/codex-bridge
+
+      - name: Generate third-party notices
+        shell: bash
+        run: npm run notices
+
+      - name: Build all editor modules
+        shell: bash
+        run: npm run build:all
+
+      - name: Build unsigned DMG and ZIP
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GENOFFICE_MAC_X64: '0'
+        run: npm run dist:mac -w @genoffice/shell
+
+      - name: Verify macOS artifacts and publish checksums
+        id: mac_artifacts
+        shell: bash
+        run: |
+          shopt -s nullglob
+          dmgs=(apps/shell/release/*.dmg)
+          zips=(apps/shell/release/*mac*.zip apps/shell/release/*.zip)
+          if (( ${#dmgs[@]} == 0 )); then
+            echo 'No macOS .dmg was produced.' >&2
+            exit 1
+          fi
+          echo '## GenOffice Codex macOS Apple Silicon' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source commit: \`$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          for file in "${dmgs[@]}"; do
+            hash=$(shasum -a 256 "$file" | awk '{print $1}')
+            echo "- DMG: \`$(basename "$file")\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- SHA256: \`$hash\`" >> "$GITHUB_STEP_SUMMARY"
+          done
+          for file in "${zips[@]}"; do
+            [[ -f "$file" ]] || continue
+            hash=$(shasum -a 256 "$file" | awk '{print $1}')
+            echo "- ZIP: \`$(basename "$file")\` — SHA256 \`$hash\`" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Upload macOS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: GenOffice-Codex-macOS-Apple-Silicon
+          path: |
+            apps/shell/release/*.dmg
+            apps/shell/release/*.zip
+            apps/shell/release/*.yml
+            apps/shell/release/*.blockmap
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
