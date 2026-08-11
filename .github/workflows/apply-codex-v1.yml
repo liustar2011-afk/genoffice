@@ -27,10 +27,10 @@ jobs:
           node-version: '22'
           cache: npm
 
-      - name: Assemble migration script
+      - name: Assemble exact migration script
         shell: bash
         run: |
-          cat tools/codex-v1-parts/*.part > /tmp/apply-codex-v1.mjs
+          cat tools/codex-v1-b64/*.b64 | base64 -d > /tmp/apply-codex-v1.mjs
           node --check /tmp/apply-codex-v1.mjs
 
       - name: Apply Codex integration
@@ -39,19 +39,38 @@ jobs:
       - name: Install dependencies and update lockfile
         run: npm install --ignore-scripts
 
+      - name: Verify bundled Codex CLI
+        run: ./node_modules/.bin/codex --version
+
       - name: Typecheck full workspace
         run: npm run typecheck
 
       - name: Test Codex bridge
         run: npm run test -w @genoffice/codex-bridge
 
+      - name: Add integration note
+        shell: bash
+        run: |
+          cat > CODEX-V1.md <<'EOF'
+          # Codex V1 integration
+
+          This branch replaces the core GenOffice LLM/agent runtime with the official Codex `app-server` while preserving GenOffice's Office engines and local `AgentSkill` tools.
+
+          - ChatGPT/Codex browser sign-in; no token scraping or token copying.
+          - Codex `app-server` drives inference and dynamic-tool orchestration.
+          - Docs, Sheets, Slides, PDF and Markdown return local Office tool results into the same Codex turn.
+          - `@openai/codex` is pinned to `0.146.0` for the V1 protocol integration.
+          - Windows x64 and standard Apple Silicon macOS release builds can bundle the matching native Codex package.
+          - Genspark-specific image/media/cloud conversion features remain as independent legacy external services in V1; they no longer provide the core LLM runtime.
+
+          The integration is generated and committed only after full workspace TypeScript checks and the Codex bridge test pass in GitHub Actions.
+          EOF
+
       - name: Commit verified integration
         shell: bash
         run: |
-          if git diff --quiet && git diff --cached --quiet; then
-            echo 'No integration changes to commit.'
-            exit 0
-          fi
+          rm -rf tools/codex-v1-parts tools/codex-v1-b64
+          rm -f .github/workflows/apply-codex-v1.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
