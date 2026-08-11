@@ -10,7 +10,14 @@ function Assert-NativeSuccess([string]$label) {
 $branch = (git branch --show-current).Trim()
 Assert-NativeSuccess 'git branch --show-current'
 if ($branch -ne 'codex-v1') { throw "Run this from branch codex-v1 (current: $branch)." }
-if ((git status --porcelain).Length -ne 0) { throw 'Working tree must be clean before finalizing Codex V1.' }
+
+$statusLines = @(git status --porcelain)
+Assert-NativeSuccess 'git status --porcelain'
+if ($statusLines.Count -ne 0) {
+  Write-Host 'Working tree has uncommitted changes:'
+  $statusLines | ForEach-Object { Write-Host "  $_" }
+  throw 'Working tree must be clean before finalizing Codex V1.'
+}
 
 powershell -ExecutionPolicy Bypass -File .\setup-codex-windows.ps1
 Assert-NativeSuccess 'setup-codex-windows.ps1'
