@@ -1,0 +1,99 @@
+h((error: unknown) => fail(error instanceof Error ? error.message : String(error)))\n        } else if (chunk.type === 'done') {\n          settle()`,
+      'electron transport runtime tool branch',
+    )
+  }
+  write('packages/agent-core/src/electron-transport.ts', text)
+}
+
+{
+  let text = read('packages/agent-core/src/loop.ts')
+  if (!text.includes('executeTransportToolRequest')) {
+    text = replaceOnce(
+      text,
+      `        onToolCall: (call) => {\n          if (generation !== this.generation || settled) return\n          this.toolCalls.push(call)\n        },\n        onStopReason: (reason) => {`,
+      `        onToolCall: (call) => {\n          if (generation !== this.generation || settled) return\n          this.toolCalls.push(call)\n        },\n        onToolRequest: (call) => this.executeTransportToolRequest(call, generation),\n        onStopReason: (reason) => {`,
+      'agent loop onToolRequest callback',
+    )
+    text = replaceOnce(
+      text,
+      `  private async finishTurn(): Promise<void> {`,
+      `  /** Execute a tool requested synchronously by a runtime such as Codex app-server.\n   * Unlike provider-style tool calls, the result goes back inside the same model turn. */\n  private async executeTransportToolRequest(\n    call: AgentToolCall,\n    generation: number,\n  ): Promise<AgentToolResult> {\n    const { events, skill, captureSnapshot } = this.options\n    if (generation !== this.generation || this.cancelled) {\n      return {\n        id: call.id,\n        name: call.name,\n        output: '(the user stopped the run; this tool was not executed)',\n        isError: true,\n      }\n    }\n    if (call.truncated || call.inputError) {\n      const output = call.truncated\n        ? 'Tool arguments were cut off by the output length limit; split the operation into smaller tool calls and retry.'\n        : \`Tool input JSON failed to parse; the tool was not executed: \${call.inputError}\`\n      events?.onToolExecuted?.({\n        call,\n        execution: { output, isError: true, summary: call.name },\n      })\n      return { id: call.id, name: call.name, output, isError: true }\n    }\n\n    events?.onToolStart?.(call)\n    const snapshot = !this.mutationSeen ? captureSnapshot?.() : undefined\n    let execution: ToolExecution\n    try {\n      execution = await skill.executeTool(call, this.abortController?.signal)\n    } catch (error) {\n      execution = {\n        output: error instanceof Error ? error.message : String(error),\n        isError: true,\n        summary: call.name,\n      }\n    }\n    if (generation !== this.generation) {\n      return { id: call.id, name: call.name, output: 'Document context changed while the tool ran.', isError: true }\n    }\n    const firstMutation = !!execution.mutated && !this.mutationSeen\n    if (execution.mutated) this.mutationSeen = true\n    events?.onToolExecuted?.({\n      call,\n      execution,\n      snapshotBefore: firstMutation ? snapshot : undefined,\n    })\n    return {\n      id: call.id,\n      name: call.name,\n      output: execution.output,\n      isError: execution.isError,\n    }\n  }\n\n  private async finishTurn(): Promise<void> {`,
+      'agent loop runtime tool executor',
+    )
+  }
+  write('packages/agent-core/src/loop.ts', text)
+}
+
+// 4) Provider metadata: Codex becomes the default AI runtime. Direct API providers remain
+//    available for compatibility, but Codex itself is handled by the app-server bridge.
+{
+  let text = read('packages/ai-provider/src/types.ts')
+  if (!text.includes("'codex'")) {
+    text = replaceOnce(
+      text,
+      `export type AiProviderId = 'genspark' | 'anthropic' | 'gemini' | 'deepseek' | 'openai' | 'custom'`,
+      `export type AiProviderId = 'codex' | 'genspark' | 'anthropic' | 'gemini' | 'deepseek' | 'openai' | 'custom'`,
+      'AiProviderId codex',
+    )
+    text = replaceOnce(
+      text,
+      `  type: 'delta' | 'tool-call' | 'done' | 'error' | 'ping'\n  text?: string\n  /** complete parsed tool call`,
+      `  type: 'delta' | 'tool-call' | 'tool-request' | 'done' | 'error' | 'ping'\n  text?: string\n  /** correlation id for runtime-managed tool requests */\n  toolRequestId?: string\n  /** complete parsed tool call`,
+      'AiStreamChunk tool-request',
+    )
+  }
+  write('packages/ai-provider/src/types.ts', text)
+}
+
+{
+  let text = read('packages/ai-provider/src/providers.ts')
+  if (!text.includes("id: 'codex'")) {
+    text = replaceOnce(
+      text,
+      `export const AI_PROVIDERS: AiProviderMeta[] = [\n  {\n    id: 'genspark',`,
+      `export const AI_PROVIDERS: AiProviderMeta[] = [\n  {\n    id: 'codex',\n    label: 'Codex (ChatGPT)',\n    models: ['auto'],\n    defaultModel: 'auto',\n    keyPlaceholder: 'Uses ChatGPT sign-in via the Codex app-server',\n  },\n  {\n    id: 'genspark',`,
+      'AI_PROVIDERS codex entry',
+    )
+    text = replaceOnce(
+      text,
+      `  return { provider: 'genspark', providers }`,
+      `  return { provider: 'codex', providers }`,
+      'default provider codex',
+    )
+  }
+  write('packages/ai-provider/src/providers.ts', text)
+}
+
+// 5) Docs IPC/preload/transport: send runtime-managed tool results back to Codex.
+{
+  let text = read('apps/docs/src/shared/ipc.ts')
+  if (!text.includes('aiStreamToolResult(')) {
+    text = replaceOnce(
+      text,
+      `// ---- agent protocol: canonical types live in @genoffice/agent-core ----\n\nexport type {`,
+      `// ---- agent protocol: canonical types live in @genoffice/agent-core ----\n\nimport type { AgentToolResult } from '@genoffice/agent-core'\n\nexport type {`,
+      'Docs AgentToolResult local import',
+    )
+    text = replaceOnce(
+      text,
+      `  aiStreamCancel(requestId: string): Promise<void>`,
+      `  aiStreamCancel(requestId: string): Promise<void>\n  /** Return a runtime-managed local Office tool result to the Codex app-server turn. */\n  aiStreamToolResult(requestId: string, toolRequestId: string, result: AgentToolResult): Promise<boolean>`,
+      'Docs DesktopApi aiStreamToolResult',
+    )
+  }
+  write('apps/docs/src/shared/ipc.ts', text)
+}
+
+{
+  let text = read('apps/docs/src/preload/index.ts')
+  if (!text.includes('aiStreamToolResult:')) {
+    text = replaceOnce(
+      text,
+      `  AiChatRequest,\n  AiSettings,`,
+      `  AgentToolResult,\n  AiChatRequest,\n  AiSettings,`,
+      'Docs preload AgentToolResult import',
+    )
+    text = replaceOnce(
+      text,
+      `  aiStreamCancel: (requestId: string) => ipcRenderer.invoke('ai:stream-cancel', requestId),\n  aiGskStatus: (withEmail?: boolean) => ipcRenderer.invoke('ai:gsk-status', withEmail),\n  aiGskLogin: () => ipcRenderer.invoke('ai:gsk-login'),`,
+      `  aiStreamCancel: (requestId: string) => ipcRenderer.invoke('ai:stream-cancel', requestId),\n  aiStreamToolResult: (requestId: string, toolRequestId: string, result: AgentToolResult) =>\n    ipcRenderer.invoke('ai:codex-tool-result', requestId, toolRequestId, result),\n  // Keep the renderer method names stable while the backend is migrated from
