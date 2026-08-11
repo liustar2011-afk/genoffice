@@ -29,6 +29,33 @@ const updateUrl = process.env.GENOFFICE_UPDATE_URL
 // switch.
 const includeMacX64 = process.env.GENOFFICE_MAC_X64 === '1'
 
+// Codex V1 packages the official host-native binary with the app. Cross-OS and
+// dual-arch mac packaging are rejected below rather than silently shipping a mismatched binary.
+const codexPlatformPackageByHost = {
+  'darwin:arm64': '@openai/codex-darwin-arm64',
+  'darwin:x64': '@openai/codex-darwin-x64',
+  'win32:x64': '@openai/codex-win32-x64',
+  'win32:arm64': '@openai/codex-win32-arm64',
+  'linux:x64': '@openai/codex-linux-x64',
+  'linux:arm64': '@openai/codex-linux-arm64',
+}
+const codexPlatformPackage = codexPlatformPackageByHost[`${process.platform}:${process.arch}`]
+if (!codexPlatformPackage) {
+  throw new Error(`Unsupported Codex packaging host: ${process.platform}/${process.arch}`)
+}
+const codexPlatformPackageFromCandidates = [
+  `../../node_modules/${codexPlatformPackage}`,
+  `../../node_modules/@openai/codex/node_modules/${codexPlatformPackage}`,
+]
+const codexPlatformPackageFrom = codexPlatformPackageFromCandidates.find((candidate) =>
+  existsSync(join(__dirname, candidate)),
+)
+if (!codexPlatformPackageFrom) {
+  throw new Error(
+    `Codex native package is missing: ${codexPlatformPackage}. Run npm install before packaging.`,
+  )
+}
+
 // The gsk CLI tree below is copied verbatim from node_modules, and the
 // nested commander path depends on npm's current hoisting layout — fail the
 // build with a clear message if an install ever changes it, instead of
@@ -83,6 +110,27 @@ function assertUniversalSidecar() {
           'run "npm run native:build:universal -w @genoffice/sheets" before packaging mac',
       )
     }
+  }
+}
+
+function assertCodexPackagingHost(context) {
+  const hostPlatform = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux'
+  if (context.electronPlatformName !== hostPlatform) {
+    throw new Error(
+      `Codex V1 release packaging must run on the target OS (host=${hostPlatform}, target=${context.electronPlatformName}).`,
+    )
+  }
+  if (context.electronPlatformName === 'darwin' && (process.arch !== 'arm64' || includeMacX64)) {
+    throw new Error(
+      'Codex V1 self-contained mac packaging supports the standard arm64 build only. ' +
+        'For Intel/x64, build on an x64 Mac with a separate target or extend the Codex platform-resource matrix.',
+    )
+  }
+  if (context.electronPlatformName === 'win32' && process.arch !== 'x64') {
+    throw new Error('Codex V1 self-contained Windows packaging currently targets x64.')
+  }
+  if (context.electronPlatformName === 'linux' && process.arch !== 'x64') {
+    throw new Error('The upstream GenOffice Linux target is x64; package Codex from an x64 Linux host.')
   }
 }
 
@@ -152,6 +200,10 @@ const config = {
     {
       from: '../pdf/node_modules/harfbuzzjs/hb-subset.wasm',
       to: 'wasm/hb-subset.wasm',
+    },
+    {
+      from: codexPlatformPackageFrom,
+      to: `codex/node_modules/${codexPlatformPackage}`,
     },
     {
       from: '../../node_modules/@genspark/cli',
@@ -339,6 +391,7 @@ const config = {
     allowToChangeInstallationDirectory: true,
   },
   beforePack: async (context) => {
+    assertCodexPackagingHost(context)
     assertModuleTreesPresent()
     if (context.electronPlatformName === 'darwin' && includeMacX64) assertUniversalSidecar()
   },

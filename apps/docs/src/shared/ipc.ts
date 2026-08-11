@@ -40,6 +40,8 @@ export { AI_PROVIDERS } from '@genoffice/ai-provider'
 
 // ---- agent protocol: canonical types live in @genoffice/agent-core ----
 
+import type { AgentToolResult } from '@genoffice/agent-core'
+
 export type {
   AgentMessage,
   AgentToolCall,
@@ -207,6 +209,8 @@ export interface DesktopApi {
   /** start a streaming AI call; deltas arrive via onAiStream with the same requestId */
   aiStream(request: AiStreamRequest): Promise<void>
   aiStreamCancel(requestId: string): Promise<void>
+  /** Return a runtime-managed local Office tool result to the Codex app-server turn. */
+  aiStreamToolResult(requestId: string, toolRequestId: string, result: AgentToolResult): Promise<boolean>
   /** Genspark account status (gsk login state); withEmail also returns the email (needs a network request, slower) */
   aiGskStatus(withEmail?: boolean): Promise<GenSparkAccountStatus>
   /** Open the browser to log in to Genspark (fire-and-forget; aiGskStatus flips to logged-in when done) */

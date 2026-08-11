@@ -277,8 +277,11 @@ const api: SlidesApi = {
   setAiSettings: (settings: AiSettings) => ipcRenderer.invoke('ai:set-settings', settings),
   aiStream: (request: AiStreamRequest) => ipcRenderer.invoke('ai:stream', request),
   aiStreamCancel: (requestId: string) => ipcRenderer.invoke('ai:stream-cancel', requestId),
-  aiGskStatus: (withEmail?: boolean) => ipcRenderer.invoke('ai:gsk-status', withEmail),
-  aiGskLogin: () => ipcRenderer.invoke('ai:gsk-login'),
+  aiStreamToolResult: (requestId, toolRequestId, result) =>
+    ipcRenderer.invoke('ai:codex-tool-result', requestId, toolRequestId, result),
+  // Keep existing renderer method names while the backing account migrates to Codex/ChatGPT.
+  aiGskStatus: (withEmail?: boolean) => ipcRenderer.invoke('ai:codex-status', withEmail),
+  aiGskLogin: () => ipcRenderer.invoke('ai:codex-login'),
   webSearch: (query: string, maxResults?: number) =>
     ipcRenderer.invoke('ai:web-search', query, maxResults),
   imageSearch: (query: string, maxResults?: number) =>

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import type {
+  AgentToolResult,
   AiChatRequest,
   AiSettings,
   AiStreamChunk,
@@ -74,8 +75,11 @@ const api: DesktopApi = {
   aiChat: (request: AiChatRequest) => ipcRenderer.invoke('ai:chat', request),
   aiStream: (request: AiStreamRequest) => ipcRenderer.invoke('ai:stream', request),
   aiStreamCancel: (requestId: string) => ipcRenderer.invoke('ai:stream-cancel', requestId),
-  aiGskStatus: (withEmail?: boolean) => ipcRenderer.invoke('ai:gsk-status', withEmail),
-  aiGskLogin: () => ipcRenderer.invoke('ai:gsk-login'),
+  aiStreamToolResult: (requestId: string, toolRequestId: string, result: AgentToolResult) =>
+    ipcRenderer.invoke('ai:codex-tool-result', requestId, toolRequestId, result),
+  // Keep the renderer method names stable while the backend is migrated from Genspark to Codex.
+  aiGskStatus: (withEmail?: boolean) => ipcRenderer.invoke('ai:codex-status', withEmail),
+  aiGskLogin: () => ipcRenderer.invoke('ai:codex-login'),
   webSearch: (query: string, maxResults?: number) =>
     ipcRenderer.invoke('ai:web-search', query, maxResults),
   imageSearch: (query: string, maxResults?: number) =>

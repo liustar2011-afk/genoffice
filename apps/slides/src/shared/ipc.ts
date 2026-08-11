@@ -1314,6 +1314,12 @@ export interface SlidesApi {
   setAiSettings: (settings: AiSettings) => Promise<void>
   aiStream: (request: AiStreamRequest) => Promise<void>
   aiStreamCancel: (requestId: string) => Promise<void>
+  /** Return a runtime-managed local Office tool result to the Codex app-server turn. */
+  aiStreamToolResult: (
+    requestId: string,
+    toolRequestId: string,
+    result: import('@genoffice/agent-core').AgentToolResult,
+  ) => Promise<boolean>
   /** Genspark account status (gsk login state); with withEmail also fetches the email (needs a network request, slower) */
   aiGskStatus: (withEmail?: boolean) => Promise<GenSparkAccountStatus>
   /** Open the browser to log into Genspark (fire-and-forget; aiGskStatus turns logged-in once done) */

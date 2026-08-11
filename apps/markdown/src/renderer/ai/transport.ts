@@ -8,6 +8,8 @@ export function createElectronTransport(getSettings: () => AiSettings): AgentTra
     onStream: (listener) => window.markdownApi.onAiStream(listener),
     start: (request) => window.markdownApi.aiStream(request),
     cancel: (requestId) => void window.markdownApi.aiStreamCancel(requestId),
+    respondTool: (requestId, toolRequestId, result) =>
+      window.markdownApi.aiStreamToolResult(requestId, toolRequestId, result),
     getSettings,
     unknownErrorText: () => t('aiUnknownError'),
     timeoutErrorText: () => t('aiTimeoutError'),
