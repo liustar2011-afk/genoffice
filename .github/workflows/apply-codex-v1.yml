@@ -1,0 +1,59 @@
+name: Apply Codex V1 integration
+
+on:
+  push:
+    branches: [codex-v1]
+    paths:
+      - .github/workflows/apply-codex-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout codex-v1
+        uses: actions/checkout@v4
+        with:
+          ref: codex-v1
+          fetch-depth: 0
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Assemble migration script
+        shell: bash
+        run: |
+          cat tools/codex-v1-parts/*.part > /tmp/apply-codex-v1.mjs
+          node --check /tmp/apply-codex-v1.mjs
+
+      - name: Apply Codex integration
+        run: node /tmp/apply-codex-v1.mjs .
+
+      - name: Install dependencies and update lockfile
+        run: npm install --ignore-scripts
+
+      - name: Typecheck full workspace
+        run: npm run typecheck
+
+      - name: Test Codex bridge
+        run: npm run test -w @genoffice/codex-bridge
+
+      - name: Commit verified integration
+        shell: bash
+        run: |
+          if git diff --quiet && git diff --cached --quiet; then
+            echo 'No integration changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat: integrate Codex app-server with ChatGPT login'
+          git push origin HEAD:codex-v1
