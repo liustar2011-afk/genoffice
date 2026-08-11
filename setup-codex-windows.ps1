@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 $repo = (Resolve-Path '.').Path
 $windowsRoot = ([System.IO.Path]::GetFullPath($env:SystemRoot)).TrimEnd('\') + '\'
 if ($repo.StartsWith($windowsRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-  throw "Do not run GenOffice from $env:SystemRoot or System32. Clone it under your user directory, for example: $HOME\source\genoffice"
+  throw "Do not run GenOffice from $env:SystemRoot or System32. Clone it under your user directory."
 }
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw 'Node.js 22.12+ is required.' }
@@ -23,7 +23,7 @@ Write-Host "npm:  $(npm --version)"
 Assert-NativeSuccess 'npm --version'
 $nodeMajor = [int]((node --version).TrimStart('v').Split('.')[0])
 if ($nodeMajor -ne 22) {
-  Write-Warning "This repository pins Node 22 in .nvmrc; current Node is $(node --version). Continue for now, but switch to Node 22 if install/build shows compatibility errors."
+  Write-Warning "This repository pins Node 22 in .nvmrc; current Node is $(node --version). Codex source verification may still work, but use Node 22 before Electron runtime validation."
 }
 
 Write-Host "npm registry: $(npm config get registry)"
@@ -32,13 +32,12 @@ Write-Host '[0/5] Checking npm registry connectivity...'
 npm ping --registry=https://registry.npmjs.org/ --loglevel=notice
 Assert-NativeSuccess 'npm ping'
 
-Write-Host '[1/5] Installing dependencies (Codex migration is intentionally NOT run inside npm postinstall)...'
-Write-Host 'Verbose/timing output is enabled so download and lifecycle-script progress is visible.'
+Write-Host '[1/5] Installing/updating npm packages WITHOUT lifecycle scripts...'
+Write-Host 'Electron binary download is intentionally skipped here so GitHub Releases cannot block Codex finalization.'
 $installArgs = @(
   'install',
-  '--foreground-scripts',
-  '--loglevel=verbose',
-  '--timing',
+  '--ignore-scripts',
+  '--loglevel=notice',
   '--progress=true',
   '--fetch-retries=5',
   '--fetch-timeout=60000',
@@ -47,22 +46,11 @@ $installArgs = @(
 )
 & npm @installArgs
 if ($LASTEXITCODE -ne 0) {
-  Write-Warning 'npm install failed. Verifying the npm cache, then retrying once with longer network timeouts...'
+  Write-Warning 'npm install --ignore-scripts failed. Verifying cache, then retrying once...'
   npm cache verify
   Assert-NativeSuccess 'npm cache verify'
-  $retryArgs = @(
-    'install',
-    '--foreground-scripts',
-    '--loglevel=verbose',
-    '--timing',
-    '--progress=true',
-    '--fetch-retries=5',
-    '--fetch-timeout=120000',
-    '--fetch-retry-mintimeout=5000',
-    '--fetch-retry-maxtimeout=180000'
-  )
-  & npm @retryArgs
-  Assert-NativeSuccess 'npm install (retry)'
+  & npm install --ignore-scripts --loglevel=notice --progress=true --fetch-retries=5 --fetch-timeout=120000 --fetch-retry-mintimeout=5000 --fetch-retry-maxtimeout=180000
+  Assert-NativeSuccess 'npm install --ignore-scripts (retry)'
 }
 
 Write-Host '[2/5] Applying Codex source migration...'
@@ -86,4 +74,5 @@ npm run test -w @genoffice/codex-bridge
 Assert-NativeSuccess 'Codex bridge tests'
 
 Write-Host ''
-Write-Host 'Codex V1 setup completed. Start GenOffice with: npm run dev'
+Write-Host 'Codex V1 source integration verified.'
+Write-Host 'Electron binary installation was intentionally deferred and will be validated separately.'
