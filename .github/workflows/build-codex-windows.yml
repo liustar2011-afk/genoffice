@@ -1,0 +1,112 @@
+name: Build Codex Windows Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex-v1
+    paths:
+      - '.github/workflows/build-codex-windows.yml'
+      - 'apps/**'
+      - 'packages/**'
+      - 'tools/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.nvmrc'
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-installer:
+    name: Windows x64 installer
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout codex-v1
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies and Electron
+        shell: pwsh
+        run: npm ci
+
+      - name: Verify bundled Codex CLI
+        shell: pwsh
+        run: .\node_modules\.bin\codex.cmd --version
+
+      - name: Typecheck GenOffice
+        shell: pwsh
+        run: npm run typecheck
+
+      - name: Test Codex bridge
+        shell: pwsh
+        run: npm run test -w @genoffice/codex-bridge
+
+      - name: Generate third-party notices
+        shell: pwsh
+        run: npm run notices
+
+      - name: Build all editor modules
+        shell: pwsh
+        run: npm run build:all
+
+      # The upstream Windows electron-builder resource path points at its
+      # historical GNU cross-build location. Codex V1 intentionally packages
+      # on a native Windows x64 host, where Cargo emits the statically-linked
+      # MSVC sidecar under target/release. Mirror that verified binary into the
+      # legacy resource location so the existing packaging contract remains
+      # unchanged.
+      - name: Stage Windows spreadsheet sidecar
+        shell: pwsh
+        run: |
+          $src = 'apps\sheets\native\xlsx-engine\target\release\xlsx-sidecar.exe'
+          $dst = 'apps\sheets\native\xlsx-engine\target\x86_64-pc-windows-gnu\release\xlsx-sidecar.exe'
+          if (-not (Test-Path $src)) { throw "Spreadsheet sidecar not found: $src" }
+          New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
+          Copy-Item -Force $src $dst
+          Get-Item $dst | Format-List FullName,Length,LastWriteTime
+
+      - name: Build NSIS installer
+        shell: pwsh
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run dist:win -w @genoffice/shell
+
+      - name: Verify installer and publish checksum
+        id: installer
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem 'apps\shell\release\*.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $exe) { throw 'No Windows installer .exe was produced.' }
+          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
+          "installer_path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+          "installer_name=$($exe.Name)" >> $env:GITHUB_OUTPUT
+          "sha256=$hash" >> $env:GITHUB_OUTPUT
+          "## GenOffice Codex Windows installer" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          "- File: ``$($exe.Name)``" >> $env:GITHUB_STEP_SUMMARY
+          "- SHA256: ``$hash``" >> $env:GITHUB_STEP_SUMMARY
+          "- Source commit: ``$env:GITHUB_SHA``" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: GenOffice-Codex-Windows-x64
+          path: |
+            apps/shell/release/*.exe
+            apps/shell/release/*.yml
+            apps/shell/release/*.blockmap
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
