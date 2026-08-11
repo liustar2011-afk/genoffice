@@ -17,8 +17,8 @@
     "packages/*"
   ],
   "scripts": {
-    "postinstall": "node tools/codex-v1/scripts/apply.mjs . && install-electron",
-    "codex:apply": "node tools/codex-v1/scripts/apply.mjs .",
+    "postinstall": "node tools/codex-v1/bootstrap.mjs . && install-electron",
+    "codex:apply": "node tools/codex-v1/bootstrap.mjs .",
     "codex:verify": "npm run codex:apply && npm run typecheck && npm run test -w @genoffice/codex-bridge",
     "format": "node tools/format-changed.mjs --write",
     "format:check": "node tools/format-changed.mjs --check",
