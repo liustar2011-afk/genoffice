@@ -1,0 +1,70 @@
+name: Publish Codex macOS DMG Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex-v1
+    paths:
+      - '.github/workflows/publish-codex-macos-release.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    name: Publish macOS Apple Silicon DMG
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: '31510573631'
+      ARTIFACT_NAME: GenOffice-Codex-macOS-Apple-Silicon-DMG
+      TAG: codex-v1-macos-0.6.0
+      ASSET_NAME: GenOffice-Codex-0.6.0-Apple-Silicon.dmg
+
+    steps:
+      - name: Download verified macOS artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh run download "$SOURCE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "$ARTIFACT_NAME" \
+            --dir dist
+          ls -lah dist
+
+      - name: Normalize DMG name and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg=$(find dist -maxdepth 1 -type f -name '*.dmg' -print -quit)
+          test -n "$dmg"
+          if [ "$(basename "$dmg")" != "$ASSET_NAME" ]; then
+            mv "$dmg" "dist/$ASSET_NAME"
+          fi
+          sha256sum "dist/$ASSET_NAME" | tee "dist/$ASSET_NAME.sha256"
+
+      - name: Publish GitHub prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              "dist/$ASSET_NAME" \
+              "dist/$ASSET_NAME.sha256" \
+              --clobber \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" \
+              "dist/$ASSET_NAME" \
+              "dist/$ASSET_NAME.sha256" \
+              --target codex-v1 \
+              --title 'GenOffice Codex 0.6.0 macOS Apple Silicon' \
+              --notes 'GenOffice Codex V1 for Apple Silicon Macs (M1/M2/M3/M4). This build includes the Codex runtime and the Slides fallback that no longer requires a Genspark login. Unsigned/unnotarized contributor build.' \
+              --prerelease \
+              --repo "$GITHUB_REPOSITORY"
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,assets
