@@ -479,6 +479,7 @@ export class AgentLoop<TSnapshot = unknown> {
           if (generation !== this.generation || settled) return
           this.toolCalls.push(call)
         },
+        onToolRequest: (call) => this.executeTransportToolRequest(call, generation),
         onStopReason: (reason) => {
           if (generation !== this.generation || settled) return
           this.turnStopReason = reason
@@ -497,6 +498,62 @@ export class AgentLoop<TSnapshot = unknown> {
         },
       },
     )
+  }
+
+  /** Execute a tool requested synchronously by a runtime such as Codex app-server.
+   * Unlike provider-style tool calls, the result goes back inside the same model turn. */
+  private async executeTransportToolRequest(
+    call: AgentToolCall,
+    generation: number,
+  ): Promise<AgentToolResult> {
+    const { events, skill, captureSnapshot } = this.options
+    if (generation !== this.generation || this.cancelled) {
+      return {
+        id: call.id,
+        name: call.name,
+        output: '(the user stopped the run; this tool was not executed)',
+        isError: true,
+      }
+    }
+    if (call.truncated || call.inputError) {
+      const output = call.truncated
+        ? 'Tool arguments were cut off by the output length limit; split the operation into smaller tool calls and retry.'
+        : `Tool input JSON failed to parse; the tool was not executed: ${call.inputError}`
+      events?.onToolExecuted?.({
+        call,
+        execution: { output, isError: true, summary: call.name },
+      })
+      return { id: call.id, name: call.name, output, isError: true }
+    }
+
+    events?.onToolStart?.(call)
+    const snapshot = !this.mutationSeen ? captureSnapshot?.() : undefined
+    let execution: ToolExecution
+    try {
+      execution = await skill.executeTool(call, this.abortController?.signal)
+    } catch (error) {
+      execution = {
+        output: error instanceof Error ? error.message : String(error),
+        isError: true,
+        summary: call.name,
+      }
+    }
+    if (generation !== this.generation) {
+      return { id: call.id, name: call.name, output: 'Document context changed while the tool ran.', isError: true }
+    }
+    const firstMutation = !!execution.mutated && !this.mutationSeen
+    if (execution.mutated) this.mutationSeen = true
+    events?.onToolExecuted?.({
+      call,
+      execution,
+      snapshotBefore: firstMutation ? snapshot : undefined,
+    })
+    return {
+      id: call.id,
+      name: call.name,
+      output: execution.output,
+      isError: execution.isError,
+    }
   }
 
   private async finishTurn(): Promise<void> {

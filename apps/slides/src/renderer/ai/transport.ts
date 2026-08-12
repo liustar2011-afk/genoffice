@@ -8,6 +8,8 @@ export function createElectronTransport(getSettings: () => AiSettings): AgentTra
     onStream: (listener) => window.slidesApi.onAiStream(listener),
     start: (request) => window.slidesApi.aiStream(request),
     cancel: (requestId) => void window.slidesApi.aiStreamCancel(requestId),
+    respondTool: (requestId, toolRequestId, result) =>
+      window.slidesApi.aiStreamToolResult(requestId, toolRequestId, result),
     getSettings,
     unknownErrorText: () => t('aiErrUnknown'),
     timeoutErrorText: () => t('aiErrStreamTimeout'),

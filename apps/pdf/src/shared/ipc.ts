@@ -419,5 +419,11 @@ export interface PdfApi {
   getAiSettings(): Promise<AiSettings>
   aiStream(request: AiStreamRequest): Promise<void>
   aiStreamCancel(requestId: string): Promise<void>
+  /** Return a runtime-managed local Office tool result to the Codex app-server turn. */
+  aiStreamToolResult(
+    requestId: string,
+    toolRequestId: string,
+    result: import('@genoffice/agent-core').AgentToolResult,
+  ): Promise<boolean>
   onAiStream(handler: (chunk: AiStreamChunk) => void): () => void
 }

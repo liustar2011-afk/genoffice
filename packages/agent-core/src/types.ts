@@ -93,6 +93,8 @@ export interface AgentStreamCallbacks {
   onDelta(text: string): void
   /** complete parsed tool call (arguments finished streaming) */
   onToolCall(call: AgentToolCall): void
+  /** Runtime-managed tool request (e.g. Codex app-server dynamic tools). The transport waits for this result before the same model turn continues. */
+  onToolRequest?(call: AgentToolCall): Promise<AgentToolResult>
   /** Phase changes within the model stream (thinking / responding / tool-input); older transports may omit this */
   onPhase?(phase: AgentPhase): void
   /** normalized stop reason of the turn ('max_tokens' = cut off by the token limit); transports may omit this */

@@ -209,6 +209,7 @@ export interface ClarifyQuestion {
 const AGENT_SYSTEM_PROMPT = `You are the AI assistant inside GenOffice Slides (a slide editor), helping users improve and generate presentations.
 
 ## Most important tool-selection principles (judge the scenario before acting)
+- **Codex authentication rule**: this build uses ChatGPT/Codex for the AI runtime. Never ask the user to sign in to Genspark, restart GenOffice to refresh a Genspark token, or treat missing Genspark credentials as a user-login problem. generate_deck automatically selects the best available renderer; when it reports Codex-native rendering mode, continue immediately with native Slides tools in the same turn until every requested page is actually on the canvas.
 - **Creating a whole new deck (from scratch)** → first gather material (web_search) and images (image_search), then call **generate_deck**. With many pages, prefer **passing topic + approx_pages + context (the real material you found)** and let the system plan internally + generate page by page + display page by page (**you don't hand-write dozens of pages, and no pages get missed / arguments truncated**). For few pages where you already know each page, you may pass core_hook+style+pages directly.
 - **Adding 1 page or a few pages to an existing deck** → generate_deck(pages: briefs for just the new pages, insert_mode:"append"). Write each page's brief in detail (real content/data per region + layout); first look at the existing pages (get_deck_context) and pass a style description matching them so new pages stay consistent. **Even a single new page goes through this cloud generation; don't fall back to native tools and build a crude page**.
 - **Redoing / redesigning an existing page** (user says "redo this page / redesign it / try another layout / make it prettier") → **regenerate_slide**: first read_slide to get the page's original copy, then pass a detailed brief (copy the text/data to keep into the brief verbatim, state what to change and the target layout); the cloud service regenerates the page in place (other pages untouched). Don't dismantle and rebuild the whole page element by element with native tools.
@@ -2357,15 +2358,16 @@ async function executeTool(
       // ── Self-driven pipeline:
       //   1) Plan: use pages if passed; with topic, the tool plans the outline via LLM (batched recursion over threshold) — fixes missing pages at the input side.
       //   2) Generate: batched concurrent cloud page generation (gsk slide_generate, one retry per page), **each batch lands immediately → frontend shows pages one by one**.
-      if (!access.generatePageCloud || !(await access.isCloudPageGenEnabled?.().catch(() => false)))
+      const cloudPageGenAvailable =
+        !!access.generatePageCloud &&
+        !!(await access.isCloudPageGenEnabled?.().catch(() => false))
+      // Genspark slide_generate is an optional renderer in the Codex build. Missing gsk
+      // credentials are never an authentication failure: planning/style still run through
+      // the configured AI runtime (Codex), and Step 2 below falls back to native Slides tools.
+      if (cloudPageGenAvailable && !access.generateFromHtml)
         return fail(
           t('aiFailGenDeck'),
-          'Cloud slide generation is unavailable — sign in to Genspark (gsk) first',
-        )
-      if (!access.generateFromHtml)
-        return fail(
-          t('aiFailGenDeck'),
-          'The current environment does not support the HTML→pptx pipeline',
+          'The cloud renderer is available but the HTML→pptx landing pipeline is unavailable',
         )
 
       // Hard gate: with unread text attachments present, refuse to generate.
@@ -2668,8 +2670,56 @@ async function executeTool(
       const deckName = String(pages[0]?.title ?? '').trim() || topic || coreHook
 
       // ── Step 2: generate page by page + land as we go (frontend shows pages one by one).
-      // The cloud service (gsk slide_generate) writes each page's HTML and converts it to a
-      // one-slide pptx; genOne returns a marker and landing reads the bytes.
+      // In a Codex build the Genspark page renderer is optional. If it is unavailable, hand the
+      // fully planned page briefs back to the same Codex turn and mechanically allow native
+      // Slides construction. This avoids an impossible gsk-login loop while preserving the
+      // existing high-polish cloud path whenever it is actually configured.
+      if (!cloudPageGenAvailable) {
+        if (state) {
+          // blockScratchBuild treats this as a completed generation hand-off, so add_shape /
+          // add_text_box / add_smartart can now construct the planned pages. Clear the cloud
+          // progress checklist so it does not tell Codex to call generate_deck again.
+          state.htmlGenerated = true
+          state.plannedPages = undefined
+          state.plannedTitles = undefined
+          state.pageDone = undefined
+          state.lastStyleSkill = styleSkill
+          state.lastTopic = topic || coreHook || ''
+        }
+        const nativePlan = pages
+          .map((p, i) => {
+            const title = String(p.title ?? '').trim() || `Page ${i + 1}`
+            const layout = String(p.layout ?? '').trim() || 'content'
+            const brief = String(p.brief ?? '').trim()
+            const images = Array.isArray(p.image_queries)
+              ? (p.image_queries as unknown[]).map(String).filter((u) => /^https?:\/\//.test(u))
+              : []
+            return (
+              `Page ${i + 1}: ${title} [${layout}]\n` +
+              `  Brief: ${brief || '(use the planned title/core hook and reference context)'}` +
+              (images.length ? `\n  Images: ${images.join(', ')}` : '')
+            )
+          })
+          .join('\n')
+        return {
+          output:
+            `Codex-native slide rendering mode activated. Genspark is not required and the user must NOT be asked to sign in or restart. Continue NOW in this same turn and build all ${total} planned page(s) on the canvas with native Slides tools.\n\n` +
+            `Unified Style Skill (apply consistently):\n${styleSkill}\n\n` +
+            `Native build contract:\n` +
+            `- replace/new blank deck: use the existing blank page as page 1; append mode: create a new page first.\n` +
+            `- for every later page call add_slide with clearText:true using the CURRENT last page as sourceIndex, and use the returned slideIndex.\n` +
+            `- create 3–6 purposeful visual elements per page with add_shape/add_text_box/add_smartart and insert_web_image when a real URL is provided. Keep one clear visual center; do not make an icon/card wall.\n` +
+            `- use the planned layout as geometry guidance. Keep titles prominent, body concise, whitespace generous, and the Style Skill colors/type hierarchy consistent.\n` +
+            `- after building each page, use execute_slide_script for alignment/spacing when needed and obey its layout audit; fix overlap/out-of-bounds before moving on.\n` +
+            `- do not stop with a plan or explanation: the task is complete only after all ${total} page(s) are visibly present on the canvas.\n\n` +
+            `Planned pages:\n${nativePlan}`,
+          mutated: false,
+          summary: t('aiSumPlan', { count: total, hook: coreHook }),
+        }
+      }
+
+      // Cloud path: gsk slide_generate writes each page's HTML and converts it to a one-slide
+      // pptx; genOne returns a marker and landing reads the bytes.
       // Land strictly in page order: nextToLand pointer; a page lands only when its marker is ready, keeping page order intact.
       const htmlByIndex: (string | null)[] = new Array(total).fill(null)
       // Per-page completion flags (aligned with pages; same reference as state.pageDone, used by buildContext progress injection)

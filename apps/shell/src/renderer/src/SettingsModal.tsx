@@ -232,7 +232,7 @@ export function SettingsModal({
               <>
                 <h3 className="set-pane-title">{t('setSecAccount')}</h3>
                 <Field label={t('setEmail')} value={loggedIn ? email : t('setNotLoggedIn')} />
-                {loggedIn && (
+                {status?.creditBalance !== undefined && (
                   <Field
                     label={t('credits')}
                     value={

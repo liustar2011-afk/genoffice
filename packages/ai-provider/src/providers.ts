@@ -26,6 +26,13 @@ export function gensparkAttributionHeaders(baseUrl?: string): Record<string, str
 
 export const AI_PROVIDERS: AiProviderMeta[] = [
   {
+    id: 'codex',
+    label: 'Codex (ChatGPT)',
+    models: ['auto'],
+    defaultModel: 'auto',
+    keyPlaceholder: 'Uses ChatGPT sign-in via the Codex app-server',
+  },
+  {
     id: 'genspark',
     label: 'Genspark',
     models: [
@@ -104,7 +111,7 @@ export function defaultAiSettings(
       baseUrl: meta.needsBaseUrl ? '' : undefined,
     }
   }
-  return { provider: 'genspark', providers }
+  return { provider: 'codex', providers }
 }
 
 /**

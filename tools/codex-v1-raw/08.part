@@ -1,0 +1,108 @@
+st=\${hostPlatform}, target=\${context.electronPlatformName}).\`,
+    )
+  }
+  if (context.electronPlatformName === 'darwin' && (process.arch !== 'arm64' || includeMacX64)) {
+    throw new Error(
+      'Codex V1 self-contained mac packaging supports the standard arm64 build only. ' +
+        'For Intel/x64, build on an x64 Mac with a separate target or extend the Codex platform-resource matrix.',
+    )
+  }
+  if (context.electronPlatformName === 'win32' && process.arch !== 'x64') {
+    throw new Error('Codex V1 self-contained Windows packaging currently targets x64.')
+  }
+  if (context.electronPlatformName === 'linux' && process.arch !== 'x64') {
+    throw new Error('The upstream GenOffice Linux target is x64; package Codex from an x64 Linux host.')
+  }
+}
+
+function assertModuleTreesPresent() {`,
+      'electron-builder Codex host guard',
+    )
+    text = replaceOnce(
+      text,
+      `    {
+      from: '../../node_modules/@genspark/cli',
+      to: 'gsk/node_modules/@genspark/cli',
+    },`,
+      `    {
+      from: codexPlatformPackageFrom,
+      to: \`codex/node_modules/\${codexPlatformPackage}\`,
+    },
+    {
+      from: '../../node_modules/@genspark/cli',
+      to: 'gsk/node_modules/@genspark/cli',
+    },`,
+      'electron-builder Codex extraResource',
+    )
+    text = replaceOnce(
+      text,
+      `  beforePack: async (context) => {
+    assertModuleTreesPresent()`,
+      `  beforePack: async (context) => {
+    assertCodexPackagingHost(context)
+    assertModuleTreesPresent()`,
+      'electron-builder Codex beforePack guard',
+    )
+  }
+  write('apps/shell/electron-builder.cjs', text)
+}
+
+{
+  let text = read('apps/shell/src/main/index.ts')
+  if (!text.includes("import { codexAppServer } from '@genoffice/codex-bridge'")) {
+    text = replaceOnce(
+      text,
+      `import { ProjectStore } from '@genoffice/project-store'`,
+      `import { ProjectStore } from '@genoffice/project-store'\nimport { codexAppServer } from '@genoffice/codex-bridge'`,
+      'Shell Codex bridge import',
+    )
+    text = replaceOnce(
+      text,
+      `  ipcMain.handle(HOME_CHANNELS.accountStatus, async () => {\n    if (!loadGenofficeAuth()) return { loggedIn: false }`,
+      `  ipcMain.handle(HOME_CHANNELS.accountStatus, async () => {\n    try {\n      const status = await codexAppServer().accountStatus(false)\n      return { loggedIn: status.loggedIn, ...(status.email ? { email: status.email } : {}) }\n    } catch {\n      return { loggedIn: false }\n    }\n    // Legacy Genspark account code is intentionally left below for an easy upstream rebase; unreachable in the Codex build.\n    if (!loadGenofficeAuth()) return { loggedIn: false }`,
+      'Shell Codex account status',
+    )
+    text = replaceOnce(
+      text,
+      `  ipcMain.handle(HOME_CHANNELS.accountLogin, async (event) => {\n    const sender = event.sender\n    pendingLoginUrl = ''`,
+      `  ipcMain.handle(HOME_CHANNELS.accountLogin, async (event) => {\n    const sender = event.sender\n    pendingLoginUrl = ''\n    const sendCodex = (payload: AccountLoginEvent) => {\n      if (!sender.isDestroyed()) sender.send(HOME_CHANNELS.accountLoginEvent, payload)\n    }\n    try {\n      const login = await codexAppServer().loginWithChatGPT()\n      pendingLoginUrl = login.authUrl ?? ''\n      sendCodex({ phase: 'launched' })\n      if (pendingLoginUrl) {\n        sendCodex({ phase: 'url', url: pendingLoginUrl })\n        void shell.openExternal(pendingLoginUrl)\n      }\n      void (async () => {\n        for (let i = 0; i < 600; i++) {\n          await new Promise((resolve) => setTimeout(resolve, 1_000))\n          if (sender.isDestroyed()) return\n          try {\n            if ((await codexAppServer().accountStatus(false)).loggedIn) {\n              pendingLoginUrl = ''\n              sendCodex({ phase: 'success' })\n              return\n            }\n          } catch {\n            // keep polling while the browser login is in progress\n          }\n        }\n        sendCodex({ phase: 'error', error: 'expired' })\n      })()\n      return true\n    } catch (error) {\n      sendCodex({ phase: 'error', error: error instanceof Error ? error.message : String(error) })\n      return false\n    }\n    // Legacy Genspark flow below is unreachable in the Codex build and retained only to reduce rebase churn.`,
+      'Shell Codex login',
+    )
+    text = replaceOnce(
+      text,
+      `  ipcMain.handle(HOME_CHANNELS.accountLogout, async () => {\n    await genofficeLogout()`,
+      `  ipcMain.handle(HOME_CHANNELS.accountLogout, async () => {\n    await codexAppServer().logout()\n    return\n    // Legacy fallback (unreachable in the Codex build).\n    await genofficeLogout()`,
+      'Shell Codex logout',
+    )
+  }
+  write('apps/shell/src/main/index.ts', text)
+}
+
+{
+  let text = read('apps/shell/src/renderer/src/SettingsModal.tsx')
+  if (text.includes(`                {loggedIn && (\n                  <Field\n                    label={t('credits')}`)) {
+    text = replaceOnce(
+      text,
+      `                {loggedIn && (\n                  <Field\n                    label={t('credits')}`,
+      `                {status?.creditBalance !== undefined && (\n                  <Field\n                    label={t('credits')}`,
+      'Shell hide Genspark credits for Codex accounts',
+    )
+  }
+  write('apps/shell/src/renderer/src/SettingsModal.tsx', text)
+}
+
+{
+  const rel = 'apps/shell/src/renderer/src/strings.ts'
+  let text = read(rel)
+  text = text.replaceAll('Sign in to Genspark', 'Sign in with ChatGPT')
+  text = text.replaceAll('Log in to Genspark', 'Sign in with ChatGPT')
+  text = text.replaceAll('登录 Genspark', '使用 ChatGPT 登录')
+  text = text.replaceAll('登入 Genspark', '使用 ChatGPT 登入')
+  text = text.replaceAll('Genspark account', 'ChatGPT account')
+  write(rel, text)
+}
+
+console.log('[genoffice-codex] patch applied successfully.')
+console.log('[genoffice-codex] next: npm install')
+console.log('[genoffice-codex] then: npm run typecheck')
+console.log('[genoffice-codex] launch Codex once and sign in, or use the Docs AI sign-in action.')

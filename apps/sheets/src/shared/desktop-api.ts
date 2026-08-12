@@ -1964,6 +1964,12 @@ export interface DesktopApi {
   /// start a streaming AI call; deltas arrive via onAiStream with the same requestId
   aiStream(request: AiStreamRequest): Promise<void>
   aiStreamCancel(requestId: string): Promise<void>
+  /** Return a runtime-managed local Office tool result to the Codex app-server turn. */
+  aiStreamToolResult(
+    requestId: string,
+    toolRequestId: string,
+    result: import('@genoffice/agent-core').AgentToolResult,
+  ): Promise<boolean>
   /// Genspark account status (gsk login state); withEmail also returns the email
   /// (needs a network request, slower)
   aiGskStatus(withEmail?: boolean): Promise<GenSparkAccountStatus>

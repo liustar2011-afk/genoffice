@@ -52,6 +52,8 @@ const api: MarkdownApi = {
   getAiSettings: () => ipcRenderer.invoke(AI_CHANNELS.getSettings),
   aiStream: (request) => ipcRenderer.invoke(AI_CHANNELS.stream, request),
   aiStreamCancel: (requestId) => ipcRenderer.invoke(AI_CHANNELS.streamCancel, requestId),
+  aiStreamToolResult: (requestId, toolRequestId, result) =>
+    ipcRenderer.invoke('ai:codex-tool-result', requestId, toolRequestId, result),
   onAiStream: (handler) => {
     const listener = (_e: Electron.IpcRendererEvent, chunk: AiStreamChunk) => handler(chunk)
     ipcRenderer.on(AI_CHANNELS.streamChunk, listener)

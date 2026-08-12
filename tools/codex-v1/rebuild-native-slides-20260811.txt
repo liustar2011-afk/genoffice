@@ -1,0 +1,1 @@
+Rebuild Windows and macOS installers after flattening the Codex-native Slides generation fallback.

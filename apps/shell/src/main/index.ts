@@ -55,6 +55,7 @@ import {
   syncCloudProjects,
 } from './cloud-projects'
 import { ProjectStore } from '@genoffice/project-store'
+import { codexAppServer } from '@genoffice/codex-bridge'
 import {
   ensureGenofficeLogin,
   genofficeLogout,
@@ -1771,11 +1772,18 @@ function registerHomeIpc(): void {
   // signed-in means GenOffice's own device-code login; the shared gsk CLI key
   // is only a silent fallback, deliberately not shown here to nudge users onto our key
   ipcMain.handle(HOME_CHANNELS.accountStatus, async () => {
+    try {
+      const status = await codexAppServer().accountStatus(false)
+      return { loggedIn: status.loggedIn, ...(status.email ? { email: status.email } : {}) }
+    } catch {
+      return { loggedIn: false }
+    }
+    // Legacy Genspark account code is intentionally left below for an easy upstream rebase; unreachable in the Codex build.
     if (!loadGenofficeAuth()) return { loggedIn: false }
     await proxyBootstrap
     const info = await gskLoginInfo()
     return info
-      ? { loggedIn: true, email: info.email, creditBalance: info.creditBalance }
+      ? { loggedIn: true, email: info!.email, creditBalance: info!.creditBalance }
       : { loggedIn: true }
   })
 
@@ -1785,6 +1793,39 @@ function registerHomeIpc(): void {
   ipcMain.handle(HOME_CHANNELS.accountLogin, async (event) => {
     const sender = event.sender
     pendingLoginUrl = ''
+    const sendCodex = (payload: AccountLoginEvent) => {
+      if (!sender.isDestroyed()) sender.send(HOME_CHANNELS.accountLoginEvent, payload)
+    }
+    try {
+      const login = await codexAppServer().loginWithChatGPT()
+      pendingLoginUrl = login.authUrl ?? ''
+      sendCodex({ phase: 'launched' })
+      if (pendingLoginUrl) {
+        sendCodex({ phase: 'url', url: pendingLoginUrl })
+        void shell.openExternal(pendingLoginUrl)
+      }
+      void (async () => {
+        for (let i = 0; i < 600; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 1_000))
+          if (sender.isDestroyed()) return
+          try {
+            if ((await codexAppServer().accountStatus(false)).loggedIn) {
+              pendingLoginUrl = ''
+              sendCodex({ phase: 'success' })
+              return
+            }
+          } catch {
+            // keep polling while the browser login is in progress
+          }
+        }
+        sendCodex({ phase: 'error', error: 'expired' })
+      })()
+      return true
+    } catch (error) {
+      sendCodex({ phase: 'error', error: error instanceof Error ? error.message : String(error) })
+      return false
+    }
+    // Legacy Genspark flow below is unreachable in the Codex build and retained only to reduce rebase churn.
     await proxyBootstrap
     const send = (payload: AccountLoginEvent) => {
       if (!sender.isDestroyed()) sender.send(HOME_CHANNELS.accountLoginEvent, payload)
@@ -1810,6 +1851,9 @@ function registerHomeIpc(): void {
   })
 
   ipcMain.handle(HOME_CHANNELS.accountLogout, async () => {
+    await codexAppServer().logout()
+    return
+    // Legacy fallback (unreachable in the Codex build).
     await genofficeLogout()
     // the cloud projects cache belongs to the account that just signed out
     clearCloudProjectsStore(cloudProjectsStorePath())

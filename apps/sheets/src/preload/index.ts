@@ -277,15 +277,19 @@ const desktopApi: DesktopApi = {
     if (!requestId) throw new Error('Invalid AI stream request id.')
     await ipcRenderer.invoke(IPC_CHANNELS.aiStreamCancel, requestId)
   },
+  async aiStreamToolResult(requestId, toolRequestId, result) {
+    if (!requestId || !toolRequestId) throw new Error('Invalid Codex tool request id.')
+    return Boolean(await ipcRenderer.invoke('ai:codex-tool-result', requestId, toolRequestId, result))
+  },
   async aiGskStatus(withEmail) {
-    const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.aiGskStatus, withEmail)
+    const result: unknown = await ipcRenderer.invoke('ai:codex-status', withEmail)
     if (!isRecord(result) || typeof result.loggedIn !== 'boolean') {
       throw new Error('Invalid Genspark account status response.')
     }
     return result as unknown as GenSparkAccountStatus
   },
   async aiGskLogin() {
-    await ipcRenderer.invoke(IPC_CHANNELS.aiGskLogin)
+    await ipcRenderer.invoke('ai:codex-login')
   },
   async webSearch(query, maxResults) {
     if (typeof query !== 'string' || !query.trim() || query.length > 512) {

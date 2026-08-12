@@ -1,6 +1,6 @@
 import type { AgentMessage, AgentToolCall, AgentToolDef } from '@genoffice/agent-core'
 
-export type AiProviderId = 'genspark' | 'anthropic' | 'gemini' | 'deepseek' | 'openai' | 'custom'
+export type AiProviderId = 'codex' | 'genspark' | 'anthropic' | 'gemini' | 'deepseek' | 'openai' | 'custom'
 
 /** Genspark account status (gsk login state; the sole auth source for AI features) */
 export interface GenSparkAccountStatus {
@@ -60,8 +60,10 @@ export interface AiStreamRequest {
 export interface AiStreamChunk {
   requestId: string
   /** 'ping' = wire-level keepalive so the renderer can tell a live stream from a dead one */
-  type: 'delta' | 'tool-call' | 'done' | 'error' | 'ping'
+  type: 'delta' | 'tool-call' | 'tool-request' | 'done' | 'error' | 'ping'
   text?: string
+  /** correlation id for runtime-managed tool requests */
+  toolRequestId?: string
   /** complete parsed tool call (emitted once its arguments finish streaming) */
   toolCall?: AgentToolCall
   error?: string

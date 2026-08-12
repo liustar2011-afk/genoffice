@@ -70,6 +70,12 @@ import { findDocxPath } from '../shared/open-file'
 import { atomicWriteFile, looksLikeZip } from './atomic-write'
 import { isExternallyModified, type DiskFileState } from './external-change'
 import { initDocsAutoUpdater } from './updater'
+import {
+  cancelCodexStream,
+  codexChat,
+  registerCodexAiIpc,
+  streamCodexRequest,
+} from './codex-ai-ipc'
 
 /**
  * Docs main-process logic as an embeddable module: no top-level side effects.
@@ -2482,11 +2488,13 @@ const activeAiStreams = new Map<string, AbortController>()
  * sheets' standalone AI handlers use the same channel names.
  */
 export function registerAiIpc(): void {
+  registerCodexAiIpc()
+
   ipcMain.handle('ai:get-settings', (): AiSettings => {
     const stored = readJson<Partial<AiSettings> & LegacyAiSettings>(SETTINGS_PATH(), {})
     const settings = resolveAiSettings(stored, defaultAiSettings())
-    // AI features all go through Genspark (gsk login); legacy settings with another provider are reset
-    settings.provider = 'genspark'
+    // Codex is the default runtime; direct API/Genspark providers remain available as fallbacks.
+    settings.provider = 'codex'
     return settings
   })
 
@@ -2514,6 +2522,10 @@ export function registerAiIpc(): void {
     const tools = request.tools ?? []
     const maxTokens = request.maxTokens ?? 8192
     const provider = settings.provider
+    if (provider === 'codex') {
+      await streamCodexRequest(event, request)
+      return
+    }
     let config = settings.providers?.[provider]
     // the genspark key never enters the settings file; requests take it from the gsk login state
     if (provider === 'genspark' && config && !config.apiKey) {
@@ -2578,6 +2590,7 @@ export function registerAiIpc(): void {
 
   ipcMain.handle('ai:stream-cancel', (_event, requestId: string) => {
     activeAiStreams.get(requestId)?.abort()
+    cancelCodexStream(requestId)
   })
 
   // shared search tools (content + images): Serper with DuckDuckGo fallback (same source as slides/sheets)
@@ -2624,6 +2637,7 @@ export function registerAiIpc(): void {
   ipcMain.handle('ai:chat', async (_event, request: AiChatRequest) => {
     const { settings, system, user } = request
     const provider = settings.provider
+    if (provider === 'codex') return codexChat(request)
     let config = settings.providers?.[provider]
     if (provider === 'genspark' && config && !config.apiKey) {
       config = { ...config, apiKey: gskApiKey() }
